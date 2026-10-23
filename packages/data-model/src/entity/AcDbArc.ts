@@ -26,6 +26,41 @@ const _dxfInNormal = /*@__PURE__*/ new AcGeVector3d()
 const _dxfInRefVec = /*@__PURE__*/ new AcGeVector3d()
 const _dxfInPoint = /*@__PURE__*/ new AcGePoint3d()
 
+const _TWO_PI = Math.PI * 2
+/** Tolerance for matching radian 2π dumped into DXF degree slots (50/51). */
+const _DXF_ARC_RADIAN_AS_DEGREE_EPS = 1e-3
+
+/**
+ * DXF groups 50/51 are degrees. Some CAXA→ODA exports write **radian** quantities
+ * into those slots. Classic balloon ring: start=0, end≈2π → read as ~6.28° sliver
+ * (invisible) instead of a full circle.
+ *
+ * Minimal knife: when the raw "degree" sweep is within ε of 2π (or end≈±2π with
+ * start≈0), rewrite as a true full circle in degrees (0→±360) before deg→rad.
+ * Does **not** convert arbitrary small degree arcs (e.g. 0→5).
+ */
+export function normalizeDxfArcAnglesAsDegrees(
+  startDeg: number,
+  endDeg: number
+): { startDeg: number; endDeg: number; normalized: boolean } {
+  const s = Number(startDeg)
+  const e = Number(endDeg)
+  if (!Number.isFinite(s) || !Number.isFinite(e)) {
+    return { startDeg: s, endDeg: e, normalized: false }
+  }
+  const sweep = e - s
+  const absSweep = Math.abs(sweep)
+  const nearTwoPiSweep = Math.abs(absSweep - _TWO_PI) < _DXF_ARC_RADIAN_AS_DEGREE_EPS
+  const startNearZeroEndNearTwoPi =
+    Math.abs(s) < _DXF_ARC_RADIAN_AS_DEGREE_EPS &&
+    Math.abs(Math.abs(e) - _TWO_PI) < _DXF_ARC_RADIAN_AS_DEGREE_EPS
+  if (!nearTwoPiSweep && !startNearZeroEndNearTwoPi) {
+    return { startDeg: s, endDeg: e, normalized: false }
+  }
+  const sign = sweep < 0 || e < 0 ? -1 : 1
+  return { startDeg: 0, endDeg: sign * 360, normalized: true }
+}
+
 /**
  * Represents an arc entity in AutoCAD.
  *
@@ -803,13 +838,14 @@ export class AcDbArc extends AcDbCurve {
     // the mirrored side of the center (messy chords for large-radius fillets).
     acgeGetOcsReferenceVectorInto(_dxfInRefVec, _dxfInNormal)
     acgeTransformOcsPointToWcsInto(_dxfInPoint, { x, y, z }, _dxfInNormal)
+    const angles = normalizeDxfArcAnglesAsDegrees(startDeg, endDeg)
     // Build the final geometry in one pass; the entity's default geometry is
     // never materialized (see the lazy _geo accessor).
     this._geo = new AcGeCircArc3d(
       _dxfInPoint,
       radius,
-      AcGeMathUtil.degToRad(startDeg),
-      AcGeMathUtil.degToRad(endDeg),
+      AcGeMathUtil.degToRad(angles.startDeg),
+      AcGeMathUtil.degToRad(angles.endDeg),
       _dxfInNormal,
       _dxfInRefVec
     )
