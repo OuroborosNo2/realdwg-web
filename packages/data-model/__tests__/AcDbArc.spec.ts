@@ -6,6 +6,7 @@ import {
 import { acdbHostApplicationServices, AcDbDxfFiler } from '../src/base'
 import { AcDbDatabase } from '../src/database'
 import { AcDbArc } from '../src/entity'
+import { normalizeDxfArcAnglesAsDegrees } from '../src/entity/AcDbArc'
 import { AcDbOsnapMode } from '../src/misc'
 import { expectDetachedClone } from '../test-utils/cloneTestUtils'
 
@@ -277,6 +278,21 @@ describe('AcDbArc', () => {
     expect(out).toContain('230\n1')
   })
 
+  it('normalizeDxfArcAnglesAsDegrees maps degree-slot 2π to full circle', () => {
+    const full = normalizeDxfArcAnglesAsDegrees(0, Math.PI * 2)
+    expect(full.normalized).toBe(true)
+    expect(full.startDeg).toBe(0)
+    expect(full.endDeg).toBe(360)
+
+    const tiny = normalizeDxfArcAnglesAsDegrees(0, 5)
+    expect(tiny.normalized).toBe(false)
+    expect(tiny.endDeg).toBe(5)
+
+    const quarter = normalizeDxfArcAnglesAsDegrees(0, 90)
+    expect(quarter.normalized).toBe(false)
+    expect(quarter.endDeg).toBe(90)
+  })
+
   it('reads AutoCAD ARC layout (AcDbCircle then AcDbArc)', () => {
     createWorkingDb()
     const dxf = [
@@ -320,6 +336,51 @@ describe('AcDbArc', () => {
     expect(arc.radius).toBeCloseTo(5)
     expect(arc.startAngle).toBeCloseTo(0)
     expect(arc.endAngle).toBeCloseTo(Math.PI / 2)
+  })
+
+  it('dxfIn treats degree-slot end≈2π as full circle (CAXA balloon rings)', () => {
+    createWorkingDb()
+    const twoPi = String(Math.PI * 2)
+    const dxf = [
+      '0',
+      'ARC',
+      '5',
+      'CC',
+      '100',
+      'AcDbEntity',
+      '8',
+      '1',
+      '100',
+      'AcDbCircle',
+      '10',
+      '0',
+      '20',
+      '0',
+      '30',
+      '0',
+      '40',
+      '2.563',
+      '100',
+      'AcDbArc',
+      '50',
+      '0',
+      '51',
+      twoPi,
+      '0',
+      'EOF'
+    ].join('\n')
+
+    const filer = AcDbDxfFiler.fromString(dxf)
+    expect(filer.readItem()?.value).toBe('ARC')
+    const arc = new AcDbArc(new AcGePoint3d(), 1, 0, Math.PI / 4)
+    arc.dxfIn(filer)
+
+    expect(arc.radius).toBeCloseTo(2.563)
+    expect(arc.startAngle).toBeCloseTo(0)
+    // Full circle: end angle is TAU (2π)
+    expect(arc.endAngle).toBeCloseTo(Math.PI * 2, 5)
+    const sweep = Math.abs(arc.endAngle - arc.startAngle)
+    expect(sweep).toBeGreaterThan(6)
   })
 
   it('syncs OCS refVec when dxfIn reads a -Z extrusion ARC', () => {
