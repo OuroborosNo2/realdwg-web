@@ -263,6 +263,91 @@ describe('AcDbRenderingCache', () => {
     expect(cache.has('*U12')).toBe(false)
   })
 
+  it('does not cache anonymous *D dimension blocks', () => {
+    const cache = new AcDbRenderingCache()
+    const renderer = {
+      group: jest.fn(() => createMockGroup())
+    }
+    const blockRecord = {
+      name: '*D0',
+      newIterator: function* () {
+        yield {
+          visibility: true,
+          color: new AcCmColor().setRGBValue(0xffffff),
+          worldDraw: () => ({ id: 'line' })
+        }
+      }
+    }
+
+    cache.draw(
+      renderer as never,
+      blockRecord as never,
+      new AcCmColor().setRGBValue(0xffffff),
+      [],
+      true
+    )
+    expect(cache.has('*D0')).toBe(false)
+  })
+
+  it('cache:false does not reuse a pre-seeded template', () => {
+    const cache = new AcDbRenderingCache()
+    cache.set('WALL', createMockGroup({ id: 'seeded' }) as never)
+    const renderer = {
+      group: jest.fn(() => createMockGroup({ id: 'fresh' }))
+    }
+    const blockRecord = {
+      name: 'WALL',
+      newIterator: function* () {
+        yield {
+          visibility: true,
+          color: new AcCmColor().setRGBValue(0xffffff),
+          worldDraw: () => ({ id: 'line' })
+        }
+      }
+    }
+
+    cache.draw(
+      renderer as never,
+      blockRecord as never,
+      new AcCmColor().setRGBValue(0xffffff),
+      [],
+      false
+    )
+    expect(renderer.group).toHaveBeenCalledTimes(1)
+  })
+
+  it('prebuildAll skips anonymous *D blocks', async () => {
+    const cache = new AcDbRenderingCache()
+    const renderer = {
+      group: jest.fn(() => createMockGroup())
+    }
+    const dimBlock = {
+      name: '*D0',
+      newIterator: function* () {
+        yield {
+          visibility: true,
+          color: new AcCmColor().setRGBValue(0xffffff),
+          worldDraw: () => ({ id: 'line' })
+        }
+      }
+    }
+    const wall = {
+      name: 'WALL',
+      newIterator: function* () {
+        yield {
+          visibility: true,
+          color: new AcCmColor().setRGBValue(0xffffff),
+          worldDraw: () => ({ id: 'line' })
+        }
+      }
+    }
+
+    await cache.prebuildAll(renderer as never, [dimBlock, wall] as never)
+
+    expect(cache.has('*D0')).toBe(false)
+    expect(cache.has('WALL')).toBe(true)
+  })
+
   it('disposes cached templates on clear', () => {
     const cache = new AcDbRenderingCache()
     const dispose = jest.fn()
