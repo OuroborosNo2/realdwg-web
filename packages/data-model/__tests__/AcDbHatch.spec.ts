@@ -122,6 +122,116 @@ describe('AcDbHatch', () => {
     expect(hatch.definitionLines[0].offset.y).toBeCloseTo(3.175 * 2)
   })
 
+  it('dxfInFields keeps a single explicit pattern line (no PAT auto-dup)', () => {
+    // patternName/scale setters expand ISO ANSI31; DXF 78/53 must replace that
+    // line, not append — else scene/PDF hatch density roughly doubles.
+    const db = createWorkingDb()
+    const hatch = new AcDbHatch()
+    db.tables.blockTable.modelSpace.appendEntity(hatch)
+
+    const dxf = [
+      '0',
+      'HATCH',
+      '5',
+      '24D',
+      '100',
+      'AcDbEntity',
+      '8',
+      '0',
+      '100',
+      'AcDbHatch',
+      '10',
+      '0.0',
+      '20',
+      '0.0',
+      '30',
+      '0.0',
+      '2',
+      'ANSI31',
+      '70',
+      '0',
+      '71',
+      '0',
+      '91',
+      '1',
+      '92',
+      '1',
+      '93',
+      '4',
+      '10',
+      '0',
+      '20',
+      '0',
+      '10',
+      '10',
+      '20',
+      '0',
+      '10',
+      '10',
+      '20',
+      '10',
+      '10',
+      '0',
+      '20',
+      '10',
+      '75',
+      '0',
+      '76',
+      '1',
+      '52',
+      '0.0',
+      '41',
+      '1.138913041467226',
+      '77',
+      '0',
+      '78',
+      '1',
+      '53',
+      '45.0',
+      '43',
+      '0.0',
+      '44',
+      '0.0',
+      '45',
+      '-2.556932703',
+      '46',
+      '2.556932703',
+      '79',
+      '0',
+      '0',
+      'ENDSEC'
+    ].join('\n')
+
+    const filer = AcDbDxfFiler.fromString(dxf, { database: db })
+    expect(filer.readItem()?.value).toBe('HATCH')
+    hatch.dxfIn(filer)
+
+    expect(hatch.patternName).toBe('ANSI31')
+    expect(hatch.patternScale).toBeCloseTo(1.138913041467226)
+    expect(hatch.definitionLines).toHaveLength(1)
+    expect(hatch.definitionLines[0].angle).toBeCloseTo(Math.PI / 4)
+    expect(hatch.definitionLines[0].offset.x).toBeCloseTo(-2.556932703)
+    expect(hatch.definitionLines[0].offset.y).toBeCloseTo(2.556932703)
+    const spacing = Math.hypot(
+      hatch.definitionLines[0].offset.x,
+      hatch.definitionLines[0].offset.y
+    )
+    expect(spacing).toBeCloseTo(3.616048906658, 5)
+
+    // subWorldDraw 会再调 updatePredefined；显式线不得被 PAT 覆盖或叠第二份
+    const fakeRenderer = {
+      subEntityTraits: {
+        fillType: null as unknown,
+        drawOrder: 0
+      },
+      area: () => 'area',
+      group: (ents: unknown[]) => ents
+    }
+    hatch.subWorldDraw(fakeRenderer as never)
+    expect(hatch.definitionLines).toHaveLength(1)
+    expect(hatch.definitionLines[0].offset.x).toBeCloseTo(-2.556932703)
+  })
+
   it('applies hatch system variables when a new hatch is added to a database', () => {
     const db = createWorkingDb()
     const manager = AcDbSysVarManager.instance()

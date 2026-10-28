@@ -496,8 +496,11 @@ export class AcDbRenderingCache {
    * Prebuilds color-independent block templates before entity flush.
    *
    * Skips layout blocks (`*Model_Space` / `*Paper_Space*`), empty blocks,
-   * anonymous `*U` blocks, and blocks that contain ByBlock-colored entities
+   * anonymous `*U` / `*D` blocks, and blocks that contain ByBlock-colored entities
    * (those require the INSERT color and are built on demand).
+   *
+   * Dimension anonymous blocks (`*D*`) are one-shot per DIMENSION and must not
+   * share a prebuilt template with `cache:false` draws (see {@link draw}).
    *
    * @param renderer - Renderer used to convert block entities
    * @param blocks - Iterator over block table records
@@ -592,13 +595,20 @@ export class AcDbRenderingCache {
       if (blockTableRecord != null) {
         const blockRgb = blockColor.RGB ?? 0
         const blockName = blockTableRecord.name
+        // Anonymous *U/*D and explicit cache:false draws are one-shot: never
+        // reuse a prebuilt/cached template (DIMENSION passes cache:false for *D).
+        const allowCache =
+          !!cache &&
+          !!blockName &&
+          !blockName.startsWith('*U') &&
+          !blockName.startsWith('*D')
         // Resolve cache hits without scanning block entities for ByBlock color.
         // Color-independent templates are keyed by name; ByBlock templates use
         // name+color. Miss path discovers ByBlock while building (one walk).
         let key: string | undefined
-        if (blockName && this.has(blockName)) {
+        if (allowCache && this.has(blockName)) {
           key = blockName
-        } else if (blockName) {
+        } else if (allowCache) {
           const colorKey = this.createKey(blockName, blockColor)
           if (this.has(colorKey)) {
             key = colorKey
@@ -659,10 +669,9 @@ export class AcDbRenderingCache {
           // - Tiny: never compact.
           // - Huge: compact eagerly on miss (clone cost dominates).
           // - Mid-size: defer until first cache hit so one-shot blocks skip it.
-          // Anonymous *U / cache:false draws are one-shot — never compact.
+          // Anonymous *U/*D / cache:false draws are one-shot — never compact.
           let compactMs = 0
-          const willCache =
-            !!cache && !!blockName && !blockName.startsWith('*U')
+          const willCache = allowCache
           if (block && willCache) {
             const tCompact0 = profile ? performance.now() : 0
             const compacted = this.maybeCompactTemplate(block, false)
@@ -753,8 +762,8 @@ export class AcDbRenderingCache {
   /**
    * Returns whether `block` should be excluded from {@link prebuildAll}.
    *
-   * Skips layout blocks, anonymous `*U` blocks, blocks with ByBlock colors
-   * (key depends on INSERT color), and blocks with no visible entities.
+   * Skips layout blocks, anonymous `*U` / `*D` blocks, blocks with ByBlock
+   * colors (key depends on INSERT color), and blocks with no visible entities.
    *
    * @param block - Block table record to evaluate.
    * @returns `true` when the block should not be prebuilt.
@@ -767,7 +776,9 @@ export class AcDbRenderingCache {
     ) {
       return true
     }
-    if (name.startsWith('*U')) {
+    // Anonymous scratch (*U) and dimension (*D) blocks are one-shot; do not
+    // prebuild templates that DIMENSION would then hit despite cache:false.
+    if (name.startsWith('*U') || name.startsWith('*D')) {
       return true
     }
     if (this.blockHasByBlockColor(block)) {
