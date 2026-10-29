@@ -15,7 +15,15 @@ import {
 } from '@mlightcad/graphic-interface'
 
 import { AcDbDxfFiler } from '../base/AcDbDxfFiler'
+import { AcDbBlockTableRecord } from '../database'
 import { AcDbOsnapMode } from '../misc/AcDbOsnapMode'
+import { AcDbArc } from './AcDbArc'
+import {
+  acdbAlignBubbleMTextData,
+  acdbPickBubbleArcCenter,
+  acdbPlainBubbleDigitLabel,
+  AcDbBubbleArcCandidate
+} from './AcDbBubbleMTextAlign'
 import { AcDbEntity } from './AcDbEntity'
 import { AcDbEntityProperties } from './AcDbEntityProperties'
 import { acdbMovePrimaryGripPointAt } from './AcDbGripHelpers'
@@ -785,6 +793,15 @@ export class AcDbMText extends AcDbEntity {
    * @returns The rendered entity, or undefined if drawing failed
    */
   subWorldDraw(renderer: AcGiRenderer, delay?: boolean) {
+    const mtextData: AcGiMTextData = this.buildBubbleAlignedMTextData()
+    return renderer.mtext(mtextData, this.getTextStyle(), delay)
+  }
+
+  /**
+   * Build MTEXT draw payload; CAXA balloon digits near a ring ARC are
+   * display-snapped to MiddleCenter at the ARC center (G3 concentricity).
+   */
+  private buildBubbleAlignedMTextData(): AcGiMTextData {
     const mtextData: AcGiMTextData = {
       text: this.contents,
       height: this.height,
@@ -797,7 +814,48 @@ export class AcDbMText extends AcDbEntity {
       lineSpaceFactor: this.lineSpacingFactor,
       lineSpaceStyle: this.lineSpacingStyle
     }
-    return renderer.mtext(mtextData, this.getTextStyle(), delay)
+    if (!acdbPlainBubbleDigitLabel(this.contents)) {
+      return mtextData
+    }
+    const center = this.findNearbyBubbleArcCenter()
+    if (!center) {
+      return mtextData
+    }
+    return acdbAlignBubbleMTextData(mtextData, center)
+  }
+
+  /** Nearest balloon-sized ARC in the same block as this MTEXT, if any. */
+  private findNearbyBubbleArcCenter(): AcDbBubbleArcCandidate | null {
+    let database
+    try {
+      database = this.database
+    } catch {
+      return null
+    }
+    const ownerId = this.getAttrWithoutException('ownerId')
+    if (!ownerId) {
+      return null
+    }
+    const owner = database.getObjectById(ownerId)
+    if (!(owner instanceof AcDbBlockTableRecord)) {
+      return null
+    }
+    const arcs: AcDbBubbleArcCandidate[] = []
+    for (const entity of owner.newIterator()) {
+      if (!(entity instanceof AcDbArc)) continue
+      const c = entity.center
+      arcs.push({
+        cx: c.x,
+        cy: c.y,
+        cz: c.z,
+        r: entity.radius
+      })
+    }
+    return acdbPickBubbleArcCenter(
+      arcs,
+      { x: this.location.x, y: this.location.y },
+      this.height
+    )
   }
 
   private encodeMTextContentsForDxf(contents: string): string {
