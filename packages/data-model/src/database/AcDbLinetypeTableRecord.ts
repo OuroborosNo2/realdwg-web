@@ -94,7 +94,37 @@ export class AcDbLinetypeTableRecord extends AcDbSymbolTableRecord<AcDbLinetypeT
       description: '',
       totalPatternLength: 0
     })
+    if (attrs.pattern) {
+      attrs.pattern = AcDbLinetypeTableRecord.normalizePatternElements(
+        attrs.pattern
+      )
+    }
     super(attrs, defaultAttrs)
+  }
+
+  /**
+   * Clears spurious complex flags that have no embedded shape/text.
+   *
+   * Some DXF writers (notably ODA File Converter) stamp group-74 complex
+   * flags on plain CENTER/DASHED dashes with `shapeNumber=0` /
+   * `styleObjectId="0"`. Downstream renderers used to treat those as
+   * unsupported complex gaps and flip pen-up segments into dashes,
+   * collapsing the pattern to a solid line. Keep only flags that carry
+   * real shape/text content.
+   */
+  static normalizePatternElements(
+    pattern: AcGiLineTypePatternElement[]
+  ): AcGiLineTypePatternElement[] {
+    return pattern.map(element => {
+      if (!element.elementTypeFlag) return element
+      const hasText = !!(element.text && element.text.length > 0)
+      const shapeNumber = element.shapeNumber ?? 0
+      const styleId = (element.styleObjectId ?? '').trim()
+      const hasShape =
+        shapeNumber !== 0 && styleId !== '' && styleId !== '0'
+      if (hasText || hasShape) return element
+      return { ...element, elementTypeFlag: 0 }
+    })
   }
 
   /**
@@ -432,7 +462,10 @@ export class AcDbLinetypeTableRecord extends AcDbSymbolTableRecord<AcDbLinetypeT
       }
     }
 
-    this.setAttr('pattern', pattern)
+    this.setAttr(
+      'pattern',
+      AcDbLinetypeTableRecord.normalizePatternElements(pattern)
+    )
     return this
   }
 }
