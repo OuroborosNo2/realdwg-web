@@ -16,6 +16,63 @@ describe('AcDbLinetypeTableRecord', () => {
     )
   })
 
+  it('clears ODA-spurious complex flags that have no shape/text', () => {
+    const record = new AcDbLinetypeTableRecord({
+      name: 'CENTER',
+      standardFlag: 0,
+      description: 'Center ____ _ ____',
+      totalPatternLength: 47.4,
+      pattern: [
+        {
+          elementLength: 22,
+          elementTypeFlag: 4,
+          shapeNumber: 0,
+          styleObjectId: '0'
+        },
+        {
+          elementLength: -8.5,
+          elementTypeFlag: 4,
+          shapeNumber: 0,
+          styleObjectId: '0'
+        },
+        {
+          elementLength: 8.5,
+          elementTypeFlag: 4,
+          shapeNumber: 0,
+          styleObjectId: '0'
+        },
+        {
+          elementLength: -8.5,
+          elementTypeFlag: 4,
+          shapeNumber: 0,
+          styleObjectId: '0'
+        }
+      ]
+    })
+
+    const pattern = record.linetype.pattern ?? []
+    expect(pattern.map(p => p.elementTypeFlag)).toEqual([0, 0, 0, 0])
+    expect(pattern.map(p => p.elementLength)).toEqual([22, -8.5, 8.5, -8.5])
+  })
+
+  it('keeps complex flags when shape or text content is present', () => {
+    const normalized = AcDbLinetypeTableRecord.normalizePatternElements([
+      {
+        elementLength: -1,
+        elementTypeFlag: 2,
+        text: 'A'
+      },
+      {
+        elementLength: -1,
+        elementTypeFlag: 4,
+        shapeNumber: 12,
+        styleObjectId: 'ABC'
+      }
+    ])
+    expect(normalized[0].elementTypeFlag).toBe(2)
+    expect(normalized[1].elementTypeFlag).toBe(4)
+  })
+
   it('renders solid linetype preview as a single SVG line', () => {
     const record = new AcDbLinetypeTableRecord({
       name: 'CONTINUOUS',
